@@ -93,8 +93,8 @@ public class GameManager : MonoBehaviour
         if (uiManager != null)
         {
             uiManager.SetRevealText(
-                "P1 Selected: " + selectedPlayer1Card.displayName,
-                "P2 Selected: Waiting..."
+                "You: " + selectedPlayer1Card.displayName,
+                "Opponent: Waiting..."
             );
         }
     }
@@ -107,9 +107,10 @@ public class GameManager : MonoBehaviour
         }
 
         uiManager.SetRoundText(currentRound, maxRounds);
-        uiManager.BuildTimelineUI(uiManager.player1TimelineParent, player1);
         uiManager.BuildTimelineUI(uiManager.player2TimelineParent, player2);
+        uiManager.BuildTimelineUI(uiManager.player1TimelineParent, player1);
+        uiManager.BuildOpponentHandUI(player2.hand.Count);
         uiManager.BuildPlayerHandUI(player1, this);
-        uiManager.SetRevealText("P1 Selected: None", "P2 Selected: None");
+        uiManager.SetRevealText("You: None", "Opponent: Hidden");
     }
 }

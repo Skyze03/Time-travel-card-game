@@ -11,8 +11,9 @@ public class GameUIManager : MonoBehaviour
     public Transform player1TimelineParent;
     public Transform player2TimelineParent;
 
-    [Header("Hand Parent")]
+    [Header("Hand Parents")]
     public Transform player1HandParent;
+    public Transform opponentHandParent;
 
     [Header("Reveal Area")]
     public TMP_Text player1RevealText;
@@ -21,6 +22,7 @@ public class GameUIManager : MonoBehaviour
     [Header("Prefabs")]
     public GameObject timelineSlotPrefab;
     public GameObject cardButtonPrefab;
+    public GameObject opponentCardBackPrefab;
 
     [Header("Buttons")]
     public Button resolveButton;
@@ -47,11 +49,15 @@ public class GameUIManager : MonoBehaviour
             GameObject slotObj = Instantiate(timelineSlotPrefab, parent);
             TimelineSlotUI slotUI = slotObj.GetComponent<TimelineSlotUI>();
 
-            string text = $"[{i + 1}] Empty";
+            string text = $"[{i + 1}]";
 
             if (!player.timeline[i].IsEmpty)
             {
-                text = $"[{i + 1}] {player.timeline[i].currentCard.card.displayName}";
+                text += "\n" + player.timeline[i].currentCard.card.displayName;
+            }
+            else
+            {
+                text += "\nEmpty";
             }
 
             if (slotUI != null)
@@ -74,6 +80,16 @@ public class GameUIManager : MonoBehaviour
             {
                 cardUI.Setup(player.hand[i], gameManager, i);
             }
+        }
+    }
+
+    public void BuildOpponentHandUI(int cardCount)
+    {
+        ClearParent(opponentHandParent);
+
+        for (int i = 0; i < cardCount; i++)
+        {
+            Instantiate(opponentCardBackPrefab, opponentHandParent);
         }
     }
 
