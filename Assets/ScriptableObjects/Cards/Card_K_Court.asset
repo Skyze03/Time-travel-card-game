@@ -16,5 +16,5 @@ MonoBehaviour:
   effectType: 7
   displayName: K
   description: Court card,
-  pointValue: 0
+  pointValue: 13
   coinValue: 0

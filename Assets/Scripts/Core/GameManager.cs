@@ -41,6 +41,9 @@ public class GameManager : MonoBehaviour
         player1.coins = 0;
         player2.coins = 0;
 
+        player1.hasActiveCamera = false;
+        player2.hasActiveCamera = false;  
+
         selectedPlayer1Card = null;
         selectedPlayer1HandIndex = -1;
         selectedTargetSlotIndex = -1;
@@ -156,9 +159,6 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            string cardText = selectedPlayer1Card != null ? selectedPlayer1Card.displayName : "None";
-            string slotText = selectedTargetSlotIndex >= 0 ? $"Slot {selectedTargetSlotIndex + 1}" : "No Slot";
-
             if (currentPhase == GamePhase.FinalResolution)
             {
                 uiManager.SetRevealText(
@@ -168,16 +168,29 @@ public class GameManager : MonoBehaviour
             }
             else
             {
+                string cardText = selectedPlayer1Card != null ? selectedPlayer1Card.displayName : "None";
+                string slotText = selectedTargetSlotIndex >= 0 ? $"Slot {selectedTargetSlotIndex + 1}" : "No Slot";
+                string forcedText = HasForcedNextSlot(player1) ? $" | Forced Slot {player1.forcedNextSlotIndex + 1}" : "";
+
                 uiManager.SetRevealText(
-                    $"You: {cardText} -> {slotText}",
+                    $"You: {cardText} -> {slotText}{forcedText}",
                     "Opponent: Hidden"
                 );
             }
         }
     }
-
+    public void RestartGame()
+    {
+        Debug.Log("Restarting game...");
+        StartNewGame();
+    }
     public bool IsSlotSelectableForCurrentTurn(int slotIndex)
     {
+        if (currentPhase != GamePhase.TurnPlanning)
+        {
+            return false;
+        }
+
         if (slotIndex < 0 || slotIndex >= player1.timeline.Length)
         {
             return false;
@@ -187,6 +200,12 @@ public class GameManager : MonoBehaviour
         if (selectedPlayer1Card == null)
         {
             return false;
+        }
+
+        // Court 强制下一回合目标 slot：优先级最高
+        if (HasForcedNextSlot(player1))
+        {
+            return slotIndex == player1.forcedNextSlotIndex;
         }
 
         // 如果这个 slot 被 Barrier 锁住，直接不可选
@@ -228,7 +247,18 @@ public class GameManager : MonoBehaviour
 
         return card.effectType == CardEffectType.Rob;
     }
+    private bool IsCameraCard(CardData card)
+    {
+        if (card == null) return false;
 
+        return card.effectType == CardEffectType.Camera;
+    }
+    private bool IsCourtCard(CardData card)
+    {
+        if (card == null) return false;
+
+        return card.effectType == CardEffectType.Court;
+    }
     private void RebuildTimePointSlots(PlayerState player)
     {
         player.timePointSlots.Clear();
@@ -298,7 +328,46 @@ public class GameManager : MonoBehaviour
     {
         return GetEarliestUsableTimePointSlot(player) >= 0;
     }
+    private bool HasForcedNextSlot(PlayerState player)
+    {
+        return player.forcedNextSlotIndex >= 0 && player.forcedNextSlotIndex < maxRounds;
+    }
+    private void ConsumeForcedSlotIfMatched(PlayerState player, int playedSlot)
+    {
+        if (player.forcedNextSlotIndex == playedSlot)
+        {
+            player.forcedNextSlotIndex = -1;
+        }
+    }
+    private void SetForcedNextSlotForBothPlayers(int forcedSlot)
+    {
+        if (forcedSlot < 0 || forcedSlot >= maxRounds)
+        {
+            return;
+        }
 
+        player1.forcedNextSlotIndex = forcedSlot;
+        player2.forcedNextSlotIndex = forcedSlot;
+
+        Debug.Log($"Both players are forced next turn at slot {forcedSlot + 1}");
+    }
+    /*private void ApplyCourtForceIfNeeded(CardData playedCard, int playedSlot)
+    {
+        if (!IsCourtCard(playedCard))
+        {
+            return;
+        }
+
+        int forcedSlot = playedSlot + 1;
+
+        if (forcedSlot < maxRounds)
+        {
+            player1.forcedNextSlotIndex = forcedSlot;
+            player2.forcedNextSlotIndex = forcedSlot;
+
+            Debug.Log($"Court played. Both players are forced next turn at slot {forcedSlot + 1}");
+        }
+    }*/
     private bool HasUsableTimePointAtResolution(PlayerState player, int currentResolvingSlot)
     {
         int earliestBarrier = GetEarliestBarrierSlot(player);
@@ -323,6 +392,28 @@ public class GameManager : MonoBehaviour
         }
 
         return false;
+    }
+    
+    private int GetCardPointValueAtSlot(PlayerState player, int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= player.timeline.Length)
+        {
+            return 0;
+        }
+
+        if (player.timeline[slotIndex].IsEmpty)
+        {
+            return 0;
+        }
+
+        CardData card = player.timeline[slotIndex].currentCard.card;
+
+        if (card == null)
+        {
+            return 0;
+        }
+
+        return card.pointValue;
     }
     public void OnPlayer1TargetSlotSelected(int slotIndex)
     {
@@ -377,25 +468,65 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        // 创建运行时牌
-        PlayedCard playedCard = new PlayedCard(
-            selectedPlayer1Card,
+        // 记录玩家本回合打出的牌和位置
+        CardData playerPlayedCard = selectedPlayer1Card;
+        int playerPlayedSlot = selectedTargetSlotIndex;
+
+        // 玩家放牌
+        PlayedCard playerPlayed = new PlayedCard(
+            playerPlayedCard,
             currentRound,
-            selectedTargetSlotIndex,
+            playerPlayedSlot,
             player1
         );
 
-        // 放到目标时间线格（允许覆盖旧牌）
-        player1.timeline[selectedTargetSlotIndex].currentCard = playedCard;
+        player1.timeline[playerPlayedSlot].currentCard = playerPlayed;
 
-        // 关键：根据当前 timeline 真实内容重建 time point 列表
+        // 更新玩家 timeline 上的 time point 状态
         RebuildTimePointSlots(player1);
 
         // 从手牌移除
         player1.hand.RemoveAt(selectedPlayer1HandIndex);
 
-        // 对手自动出一张
-        AutoPlayForPlayer2();
+        // 对手本回合也出牌，但这里只是“完成本回合 placement”
+        CardData opponentPlayedCard;
+        int opponentPlayedSlot;
+        AutoPlayForPlayer2(out opponentPlayedCard, out opponentPlayedSlot);
+
+        // Step 1: 先消费旧 forced（本回合如果刚好打在 forced slot 上，就表示已经履行）
+        ConsumeForcedSlotIfMatched(player1, playerPlayedSlot);
+        ConsumeForcedSlotIfMatched(player2, opponentPlayedSlot);
+
+        // Step 2: 再根据“本回合刚打出的 Court”创建下一回合 forced
+        int nextForcedSlot = -1;
+
+        if (IsCourtCard(playerPlayedCard))
+        {
+            int candidate = playerPlayedSlot + 1;
+            if (candidate < maxRounds)
+            {
+                nextForcedSlot = candidate;
+            }
+        }
+
+        if (IsCourtCard(opponentPlayedCard))
+        {
+            int candidate = opponentPlayedSlot + 1;
+            if (candidate < maxRounds)
+            {
+                // 如果双方这回合都打出 Court，并且产生不同 candidate，
+                // 目前先取较大的那个。这个规则以后可以再和 Mac 微调。
+                if (nextForcedSlot == -1 || candidate > nextForcedSlot)
+                {
+                    nextForcedSlot = candidate;
+                }
+            }
+        }
+
+        if (nextForcedSlot >= 0)
+        {
+            SetForcedNextSlotForBothPlayers(nextForcedSlot);
+        }
 
         // 回合前进
         currentRound++;
@@ -414,15 +545,18 @@ public class GameManager : MonoBehaviour
         RefreshAllUI();
     }
 
-    private void AutoPlayForPlayer2()
+    private void AutoPlayForPlayer2(out CardData opponentPlayedCard, out int opponentPlayedSlot)
     {
+        opponentPlayedCard = null;
+        opponentPlayedSlot = -1;
+
         if (player2.hand.Count == 0) return;
 
         int randomIndex = Random.Range(0, player2.hand.Count);
         CardData opponentCard = player2.hand[randomIndex];
 
-        // 最基础版本：对手总是放在当前 round 对应的 slot
-        int opponentSlot = currentRound;
+        // 这里只能读取“本回合开始时已经存在的 forced slot”
+        int opponentSlot = HasForcedNextSlot(player2) ? player2.forcedNextSlotIndex : currentRound;
 
         PlayedCard playedCard = new PlayedCard(
             opponentCard,
@@ -433,10 +567,13 @@ public class GameManager : MonoBehaviour
 
         player2.timeline[opponentSlot].currentCard = playedCard;
 
-        // 关键：根据当前 timeline 真实内容重建 time point 列表
+        // 这里只负责放牌，不要在这里消费 forced，也不要在这里创建新的 Court forced
         RebuildTimePointSlots(player2);
 
         player2.hand.RemoveAt(randomIndex);
+
+        opponentPlayedCard = opponentCard;
+        opponentPlayedSlot = opponentSlot;
     }
 
     public void OnMainActionButtonPressed()
@@ -502,37 +639,138 @@ public class GameManager : MonoBehaviour
         slotData.player1SlotGain = GetBaseCoinGainForCardAtSlot(player1, slotIndex);
         slotData.player2SlotGain = GetBaseCoinGainForCardAtSlot(player2, slotIndex);
 
-        // Step 2: 处理 Player 1 的 Rob
+        // Step 2: 本格若有 Camera，先激活
+        if (!player1.timeline[slotIndex].IsEmpty)
+        {
+            CardData p1Card = player1.timeline[slotIndex].currentCard.card;
+
+            if (IsCameraCard(p1Card))
+            {
+                player1.hasActiveCamera = true;
+                Debug.Log($"Player 1 activates Camera at slot {slotIndex + 1}");
+            }
+        }
+
+        if (!player2.timeline[slotIndex].IsEmpty)
+        {
+            CardData p2Card = player2.timeline[slotIndex].currentCard.card;
+
+            if (IsCameraCard(p2Card))
+            {
+                player2.hasActiveCamera = true;
+                Debug.Log($"Player 2 activates Camera at slot {slotIndex + 1}");
+            }
+        }
+
+        // Step 3: 处理 Player 1 的 Rob
         if (!player1.timeline[slotIndex].IsEmpty)
         {
             CardData p1Card = player1.timeline[slotIndex].currentCard.card;
 
             if (IsRobCard(p1Card))
             {
-                int stolen = slotData.player2SlotGain;
-                slotData.player2SlotGain -= stolen;
-                slotData.player1SlotGain += stolen;
+                if (player2.hasActiveCamera)
+                {
+                    player2.hasActiveCamera = false;
+                    Debug.Log($"Player 2's Camera blocks Player 1's Rob at slot {slotIndex + 1}");
+                }
+                else
+                {
+                    int stolen = slotData.player2SlotGain;
+                    slotData.player2SlotGain -= stolen;
+                    slotData.player1SlotGain += stolen;
 
-                Debug.Log($"Player 1 robs {stolen} coins from Player 2 at slot {slotIndex + 1}");
+                    Debug.Log($"Player 1 robs {stolen} coins from Player 2 at slot {slotIndex + 1}");
+                }
             }
         }
 
-        // Step 3: 处理 Player 2 的 Rob
+        // Step 4: 处理 Player 2 的 Rob
         if (!player2.timeline[slotIndex].IsEmpty)
         {
             CardData p2Card = player2.timeline[slotIndex].currentCard.card;
 
             if (IsRobCard(p2Card))
             {
-                int stolen = slotData.player1SlotGain;
-                slotData.player1SlotGain -= stolen;
-                slotData.player2SlotGain += stolen;
+                if (player1.hasActiveCamera)
+                {
+                    player1.hasActiveCamera = false;
+                    Debug.Log($"Player 1's Camera blocks Player 2's Rob at slot {slotIndex + 1}");
+                }
+                else
+                {
+                    int stolen = slotData.player1SlotGain;
+                    slotData.player1SlotGain -= stolen;
+                    slotData.player2SlotGain += stolen;
 
-                Debug.Log($"Player 2 robs {stolen} coins from Player 1 at slot {slotIndex + 1}");
+                    Debug.Log($"Player 2 robs {stolen} coins from Player 1 at slot {slotIndex + 1}");
+                }
             }
         }
 
-        // Step 4: 把这个 slot 的收益写入总 coins
+        // Step 5: 处理 Court（由前一格触发，比较当前格）
+        int previousSlot = slotIndex - 1;
+
+        if (previousSlot >= 0)
+        {
+            bool player1HasCourt = false;
+            bool player2HasCourt = false;
+
+            if (!player1.timeline[previousSlot].IsEmpty)
+            {
+                CardData p1PrevCard = player1.timeline[previousSlot].currentCard.card;
+                player1HasCourt = IsCourtCard(p1PrevCard);
+            }
+
+            if (!player2.timeline[previousSlot].IsEmpty)
+            {
+                CardData p2PrevCard = player2.timeline[previousSlot].currentCard.card;
+                player2HasCourt = IsCourtCard(p2PrevCard);
+            }
+
+            int p1Point = GetCardPointValueAtSlot(player1, slotIndex);
+            int p2Point = GetCardPointValueAtSlot(player2, slotIndex);
+
+            // Player 1 发起 Court
+            if (player1HasCourt)
+            {
+                if (p1Point > p2Point)
+                {
+                    slotData.player1SlotGain += 10;
+                    Debug.Log($"Player 1 wins Court at slot {slotIndex + 1} and gains +10");
+                }
+                else if (p2Point > p1Point)
+                {
+                    slotData.player2SlotGain += 10;
+                    Debug.Log($"Player 2 wins Player 1's Court at slot {slotIndex + 1} and gains +10");
+                }
+                else
+                {
+                    Debug.Log($"Player 1's Court at slot {slotIndex + 1} ends in a tie");
+                }
+            }
+
+            // Player 2 发起 Court
+            if (player2HasCourt)
+            {
+                if (p2Point > p1Point)
+                {
+                    slotData.player2SlotGain += 10;
+                    Debug.Log($"Player 2 wins Court at slot {slotIndex + 1} and gains +10");
+                }
+                else if (p1Point > p2Point)
+                {
+                    slotData.player1SlotGain += 10;
+                    Debug.Log($"Player 1 wins Player 2's Court at slot {slotIndex + 1} and gains +10");
+                }
+                else
+                {
+                    Debug.Log($"Player 2's Court at slot {slotIndex + 1} ends in a tie");
+                }
+            }
+        }
+
+        // Step 6: 把这个 slot 的收益写入总 coins
         player1.coins += slotData.player1SlotGain;
         player2.coins += slotData.player2SlotGain;
 
@@ -593,6 +831,9 @@ public class GameManager : MonoBehaviour
 
         player1.coins = 0;
         player2.coins = 0;
+
+        player1.hasActiveCamera = false;
+        player2.hasActiveCamera = false;
 
         for (int slotIndex = 0; slotIndex < maxRounds; slotIndex++)
         {

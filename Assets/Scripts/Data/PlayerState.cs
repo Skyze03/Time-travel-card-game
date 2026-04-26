@@ -9,7 +9,7 @@ public class PlayerState
 
     public int coins;
     public bool hasActiveCamera;
-
+    public int forcedNextSlotIndex;
     public List<int> timePointSlots = new List<int>();
 
     public PlayerState(string id)
@@ -17,6 +17,7 @@ public class PlayerState
         playerId = id;
         coins = 0;
         hasActiveCamera = false;
+        forcedNextSlotIndex = -1;
 
         for (int i = 0; i < 12; i++)
         {

@@ -16,5 +16,5 @@ MonoBehaviour:
   effectType: 8
   displayName: Joker
   description: 
-  pointValue: 0
+  pointValue: 99
   coinValue: 0

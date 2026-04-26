@@ -16,5 +16,5 @@ MonoBehaviour:
   effectType: 0
   displayName: A
   description: 
-  pointValue: 0
+  pointValue: 1
   coinValue: 0
