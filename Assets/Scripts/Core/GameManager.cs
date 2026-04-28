@@ -232,6 +232,37 @@ public class GameManager : MonoBehaviour
         return HasUsableTimePointBeforeSlot(player1, slotIndex);
     }
 
+    private void ResetAllJokerCancellationFlags(PlayerState player)
+    {
+        for (int i = 0; i < player.timeline.Length; i++)
+        {
+            if (!player.timeline[i].IsEmpty && player.timeline[i].currentCard != null)
+            {
+                player.timeline[i].currentCard.isCancelledByJoker = false;
+            }
+        }
+    }
+    private bool IsCardCancelledAtSlot(PlayerState player, int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= player.timeline.Length)
+        {
+            return false;
+        }
+
+        if (player.timeline[slotIndex].IsEmpty)
+        {
+            return false;
+        }
+
+        PlayedCard playedCard = player.timeline[slotIndex].currentCard;
+
+        if (playedCard == null)
+        {
+            return false;
+        }
+
+        return playedCard.isCancelledByJoker;
+    }
     private bool IsTimePointCard(CardData card)
     {
         if (card == null) return false;
@@ -262,6 +293,12 @@ public class GameManager : MonoBehaviour
         if (card == null) return false;
 
         return card.effectType == CardEffectType.Court;
+    }
+    private bool IsJokerCard(CardData card)
+    {
+        if (card == null) return false;
+
+        return card.effectType == CardEffectType.Joker;
     }
     private void RebuildTimePointSlots(PlayerState player)
     {
@@ -717,6 +754,12 @@ public class GameManager : MonoBehaviour
             return 0;
         }
 
+        if (IsCardCancelledAtSlot(player, slotIndex))
+        {
+            Debug.Log($"{player.playerId}'s card at slot {slotIndex + 1} is cancelled by Joker");
+            return 0;
+        }
+
         CardData card = player.timeline[slotIndex].currentCard.card;
 
         switch (card.effectType)
@@ -755,6 +798,36 @@ public class GameManager : MonoBehaviour
     private void ResolveSingleSlot(int slotIndex)
     {
         Debug.Log($"--- Resolving slot {slotIndex + 1} ---");
+        
+        // Step 0: 先处理 Joker（最高优先级）
+        bool player1HasJoker = false;
+        bool player2HasJoker = false;
+
+        if (!player1.timeline[slotIndex].IsEmpty)
+        {
+            CardData p1Card = player1.timeline[slotIndex].currentCard.card;
+            player1HasJoker = IsJokerCard(p1Card);
+        }
+
+        if (!player2.timeline[slotIndex].IsEmpty)
+        {
+            CardData p2Card = player2.timeline[slotIndex].currentCard.card;
+            player2HasJoker = IsJokerCard(p2Card);
+        }
+
+        // Player 1 的 Joker 取消 Player 2 同格牌
+        if (player1HasJoker && !player2.timeline[slotIndex].IsEmpty)
+        {
+            player2.timeline[slotIndex].currentCard.isCancelledByJoker = true;
+            Debug.Log($"Player 1's Joker cancels Player 2's card at slot {slotIndex + 1}");
+        }
+
+        // Player 2 的 Joker 取消 Player 1 同格牌
+        if (player2HasJoker && !player1.timeline[slotIndex].IsEmpty)
+        {
+            player1.timeline[slotIndex].currentCard.isCancelledByJoker = true;
+            Debug.Log($"Player 2's Joker cancels Player 1's card at slot {slotIndex + 1}");
+        }
 
         SlotResolutionData slotData = new SlotResolutionData();
 
@@ -763,7 +836,7 @@ public class GameManager : MonoBehaviour
         slotData.player2SlotGain = GetBaseCoinGainForCardAtSlot(player2, slotIndex);
 
         // Step 2: 本格若有 Camera，先激活
-        if (!player1.timeline[slotIndex].IsEmpty)
+        if (!player1.timeline[slotIndex].IsEmpty && !IsCardCancelledAtSlot(player1, slotIndex))
         {
             CardData p1Card = player1.timeline[slotIndex].currentCard.card;
 
@@ -774,7 +847,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        if (!player2.timeline[slotIndex].IsEmpty)
+        if (!player2.timeline[slotIndex].IsEmpty && !IsCardCancelledAtSlot(player2, slotIndex))
         {
             CardData p2Card = player2.timeline[slotIndex].currentCard.card;
 
@@ -786,7 +859,7 @@ public class GameManager : MonoBehaviour
         }
 
         // Step 3: 处理 Player 1 的 Rob
-        if (!player1.timeline[slotIndex].IsEmpty)
+        if (!player1.timeline[slotIndex].IsEmpty && !IsCardCancelledAtSlot(player1, slotIndex))
         {
             CardData p1Card = player1.timeline[slotIndex].currentCard.card;
 
@@ -809,7 +882,7 @@ public class GameManager : MonoBehaviour
         }
 
         // Step 4: 处理 Player 2 的 Rob
-        if (!player2.timeline[slotIndex].IsEmpty)
+        if (!player2.timeline[slotIndex].IsEmpty && !IsCardCancelledAtSlot(player2, slotIndex))
         {
             CardData p2Card = player2.timeline[slotIndex].currentCard.card;
 
@@ -839,13 +912,13 @@ public class GameManager : MonoBehaviour
             bool player1HasCourt = false;
             bool player2HasCourt = false;
 
-            if (!player1.timeline[previousSlot].IsEmpty)
+            if (!player1.timeline[previousSlot].IsEmpty && !IsCardCancelledAtSlot(player1, slotIndex))
             {
                 CardData p1PrevCard = player1.timeline[previousSlot].currentCard.card;
                 player1HasCourt = IsCourtCard(p1PrevCard);
             }
 
-            if (!player2.timeline[previousSlot].IsEmpty)
+            if (!player2.timeline[previousSlot].IsEmpty && !IsCardCancelledAtSlot(player2, slotIndex))
             {
                 CardData p2PrevCard = player2.timeline[previousSlot].currentCard.card;
                 player2HasCourt = IsCourtCard(p2PrevCard);
@@ -958,6 +1031,9 @@ public class GameManager : MonoBehaviour
         player1.hasActiveCamera = false;
         player2.hasActiveCamera = false;
 
+        ResetAllJokerCancellationFlags(player1);
+        ResetAllJokerCancellationFlags(player2);
+        
         for (int slotIndex = 0; slotIndex < maxRounds; slotIndex++)
         {
             ResolveSingleSlot(slotIndex);

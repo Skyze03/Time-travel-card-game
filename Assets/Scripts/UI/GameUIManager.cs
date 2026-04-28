@@ -55,7 +55,14 @@ public class GameUIManager : MonoBehaviour
 
             if (!player.timeline[i].IsEmpty)
             {
-                text += "\n" + player.timeline[i].currentCard.card.displayName;
+                if (player.timeline[i].currentCard.isCancelledByJoker)
+                {
+                    text += "\nCancelled";
+                }
+                else
+                {
+                    text += "\n" + player.timeline[i].currentCard.card.displayName;
+                }
             }
             else
             {
