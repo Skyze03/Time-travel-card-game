@@ -300,9 +300,82 @@ public class GameManager : MonoBehaviour
 
         return card.effectType == CardEffectType.Joker;
     }
+    private bool IsCardEffectivelyCancelledByJoker(PlayerState self, PlayerState opponent, int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= maxRounds)
+        {
+            return false;
+        }
+
+        if (self.timeline[slotIndex].IsEmpty)
+        {
+            return false;
+        }
+
+        if (opponent.timeline[slotIndex].IsEmpty)
+        {
+            return false;
+        }
+
+        CardData opponentCard = opponent.timeline[slotIndex].currentCard.card;
+
+        return IsJokerCard(opponentCard);
+    }
+    private bool DoesPlayerHaveActiveCourtAtSlot(PlayerState self, PlayerState opponent, int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= maxRounds)
+        {
+            return false;
+        }
+
+        if (self.timeline[slotIndex].IsEmpty)
+        {
+            return false;
+        }
+
+        CardData selfCard = self.timeline[slotIndex].currentCard.card;
+
+        if (!IsCourtCard(selfCard))
+        {
+            return false;
+        }
+
+        if (IsCardEffectivelyCancelledByJoker(self, opponent, slotIndex))
+        {
+            return false;
+        }
+
+        return true;
+    }  
+    private int GetForcedNextSlotFromThisRound(int roundSlotIndex)
+    {
+        if (roundSlotIndex < 0 || roundSlotIndex >= maxRounds)
+        {
+            return -1;
+        }
+
+        bool player1CourtActive = DoesPlayerHaveActiveCourtAtSlot(player1, player2, roundSlotIndex);
+        bool player2CourtActive = DoesPlayerHaveActiveCourtAtSlot(player2, player1, roundSlotIndex);
+
+        if (!player1CourtActive && !player2CourtActive)
+        {
+            return -1;
+        }
+
+        int nextSlot = roundSlotIndex + 1;
+
+        if (nextSlot >= maxRounds)
+        {
+            return -1;
+        }
+
+        return nextSlot;
+    }
     private void RebuildTimePointSlots(PlayerState player)
     {
         player.timePointSlots.Clear();
+
+        PlayerState opponent = GetOpponent(player);
 
         for (int i = 0; i < player.timeline.Length; i++)
         {
@@ -310,14 +383,22 @@ public class GameManager : MonoBehaviour
             {
                 CardData card = player.timeline[i].currentCard.card;
 
-                if (IsTimePointCard(card))
+                if (IsTimePointCard(card) && !IsCardEffectivelyCancelledByJoker(player, opponent, i))
                 {
                     player.timePointSlots.Add(i);
                 }
             }
         }
     }
+    private PlayerState GetOpponent(PlayerState player)
+    {
+        if (player == player1)
+        {
+            return player2;
+        }
 
+        return player1;
+    }
     /*private int GetEarliestBarrierSlot(PlayerState player)
     {
         for (int i = 0; i < player.timeline.Length; i++)
@@ -371,22 +452,28 @@ public class GameManager : MonoBehaviour
 
         for (int i = 0; i < maxRounds; i++)
         {
-            bool player1HasBarrier = false;
-            bool player2HasBarrier = false;
+            bool player1HasActiveBarrier = false;
+            bool player2HasActiveBarrier = false;
 
             if (!player1.timeline[i].IsEmpty)
             {
                 CardData p1Card = player1.timeline[i].currentCard.card;
-                player1HasBarrier = IsBarrierCard(p1Card);
+
+                player1HasActiveBarrier =
+                    IsBarrierCard(p1Card) &&
+                    !IsCardEffectivelyCancelledByJoker(player1, player2, i);
             }
 
             if (!player2.timeline[i].IsEmpty)
             {
                 CardData p2Card = player2.timeline[i].currentCard.card;
-                player2HasBarrier = IsBarrierCard(p2Card);
+
+                player2HasActiveBarrier =
+                    IsBarrierCard(p2Card) &&
+                    !IsCardEffectivelyCancelledByJoker(player2, player1, i);
             }
 
-            if (player1HasBarrier || player2HasBarrier)
+            if (player1HasActiveBarrier || player2HasActiveBarrier)
             {
                 best = i;
             }
@@ -402,22 +489,28 @@ public class GameManager : MonoBehaviour
 
         for (int i = 0; i <= cappedMax; i++)
         {
-            bool player1HasBarrier = false;
-            bool player2HasBarrier = false;
+            bool player1HasActiveBarrier = false;
+            bool player2HasActiveBarrier = false;
 
             if (!player1.timeline[i].IsEmpty)
             {
                 CardData p1Card = player1.timeline[i].currentCard.card;
-                player1HasBarrier = IsBarrierCard(p1Card);
+
+                player1HasActiveBarrier =
+                    IsBarrierCard(p1Card) &&
+                    !IsCardEffectivelyCancelledByJoker(player1, player2, i);
             }
 
             if (!player2.timeline[i].IsEmpty)
             {
                 CardData p2Card = player2.timeline[i].currentCard.card;
-                player2HasBarrier = IsBarrierCard(p2Card);
+
+                player2HasActiveBarrier =
+                    IsBarrierCard(p2Card) &&
+                    !IsCardEffectivelyCancelledByJoker(player2, player1, i);
             }
 
-            if (player1HasBarrier || player2HasBarrier)
+            if (player1HasActiveBarrier || player2HasActiveBarrier)
             {
                 best = i;
             }
@@ -656,7 +749,7 @@ public class GameManager : MonoBehaviour
         // Step 1: 先消费旧 forced（本回合如果刚好打在 forced slot 上，就表示已经履行）
         ConsumeForcedSlotIfMatched(player1, playerPlayedSlot);
         ConsumeForcedSlotIfMatched(player2, opponentPlayedSlot);
-
+        /*
         // Step 2: 再根据“本回合刚打出的 Court”创建下一回合 forced
         int nextForcedSlot = -1;
 
@@ -687,7 +780,15 @@ public class GameManager : MonoBehaviour
         {
             SetForcedNextSlotForBothPlayers(nextForcedSlot);
         }
+        */
 
+        // Step 2: 再根据“本回合这个 slot 上是否存在有效 Court”来决定下一回合 forced slot
+        int nextForcedSlot = GetForcedNextSlotFromThisRound(currentRound);
+
+        if (nextForcedSlot >= 0)
+        {
+            SetForcedNextSlotForBothPlayers(nextForcedSlot);
+        }
         // 回合前进
         currentRound++;
 
@@ -912,13 +1013,15 @@ public class GameManager : MonoBehaviour
             bool player1HasCourt = false;
             bool player2HasCourt = false;
 
-            if (!player1.timeline[previousSlot].IsEmpty && !IsCardCancelledAtSlot(player1, slotIndex))
+            if (!player1.timeline[previousSlot].IsEmpty &&
+                !IsCardEffectivelyCancelledByJoker(player1, player2, previousSlot))
             {
                 CardData p1PrevCard = player1.timeline[previousSlot].currentCard.card;
                 player1HasCourt = IsCourtCard(p1PrevCard);
             }
 
-            if (!player2.timeline[previousSlot].IsEmpty && !IsCardCancelledAtSlot(player2, slotIndex))
+            if (!player2.timeline[previousSlot].IsEmpty &&
+                !IsCardEffectivelyCancelledByJoker(player2, player1, previousSlot))
             {
                 CardData p2PrevCard = player2.timeline[previousSlot].currentCard.card;
                 player2HasCourt = IsCourtCard(p2PrevCard);
